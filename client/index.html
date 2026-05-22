@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CollabCode — Real-time Collaborative Editor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23388bfd' stroke-width='2.5'><polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/></svg>" />
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #090d13;
+      color: #e6edf3;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* ─── JOIN OVERLAY ─── */
+    #joinOverlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: #090d13;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .join-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 14px;
+      padding: 40px 44px;
+      width: 420px;
+      max-width: 95vw;
+    }
+    .join-logo {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: linear-gradient(135deg, #388bfd, #7c3aed);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 20px;
+    }
+    .join-card h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+    .join-card p { font-size: 13px; color: #8b949e; margin-bottom: 28px; }
+    .join-field { margin-bottom: 14px; }
+    .join-field label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 6px; font-weight: 500; }
+    .join-input {
+      width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+      color: #e6edf3; font-family: 'Inter', sans-serif; font-size: 14px;
+      padding: 10px 14px; outline: none; transition: border-color .15s;
+    }
+    .join-input:focus { border-color: #388bfd; }
+    .join-row { display: flex; gap: 10px; margin-bottom: 14px; }
+    .join-or { text-align: center; font-size: 12px; color: #484f58; margin: 18px 0; position: relative; }
+    .join-or::before, .join-or::after { content: ''; position: absolute; top: 50%; width: 40%; height: 1px; background: #21262d; }
+    .join-or::before { left: 0; } .join-or::after { right: 0; }
+    .btn-primary {
+      width: 100%; background: #238636; border: none; border-radius: 8px;
+      color: white; font-family: 'Inter', sans-serif; font-size: 14px;
+      font-weight: 500; padding: 11px; cursor: pointer; transition: background .15s;
+    }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-secondary {
+      flex: 1; background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+      color: #c9d1d9; font-family: 'Inter', sans-serif; font-size: 13px;
+      padding: 10px; cursor: pointer; transition: all .15s;
+    }
+    .btn-secondary:hover { border-color: #484f58; color: #e6edf3; }
+
+    /* ─── APP SHELL ─── */
+    #app { display: none; flex-direction: column; height: 100vh; }
+
+    /* ─── TOP BAR ─── */
+    .topbar {
+      background: #161b22; border-bottom: 1px solid #30363d;
+      padding: 0 16px; display: flex; align-items: center; gap: 12px; height: 52px;
+      flex-shrink: 0;
+    }
+    .logo {
+      width: 30px; height: 30px; border-radius: 8px;
+      background: linear-gradient(135deg, #388bfd, #7c3aed);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .app-title { font-weight: 600; font-size: 15px; letter-spacing: -.3px; }
+    .divider { width: 1px; height: 20px; background: #30363d; }
+    .room-pill {
+      background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+      padding: 4px 12px; cursor: pointer; display: flex; align-items: center;
+      gap: 8px; font-size: 12px; color: #8b949e; transition: border-color .15s;
+    }
+    .room-pill:hover { border-color: #484f58; }
+    .room-pill .room-id { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c9d1d9; }
+    .spacer { flex: 1; }
+    .lang-btn {
+      background: none; border: 1px solid #30363d; border-radius: 6px;
+      cursor: pointer; padding: 4px 10px; font-size: 12px;
+      font-family: 'JetBrains Mono', monospace; color: #8b949e; transition: all .15s;
+    }
+    .lang-btn.active { background: #1c2128; border-color: #388bfd; color: #388bfd; }
+    .lang-btn:hover:not(.active) { border-color: #555; color: #c9d1d9; }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: white; flex-shrink: 0; border: 2px solid #161b22; }
+    .online-dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .save-status { font-size: 12px; display: flex; align-items: center; gap: 5px; }
+
+    /* ─── MAIN AREA ─── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ─── SIDEBAR ─── */
+    .sidebar {
+      width: 210px; background: #161b22; border-right: 1px solid #30363d;
+      display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+    }
+    .sec-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px 8px; cursor: pointer; user-select: none;
+    }
+    .sec-header:hover { background: #1c2128; }
+    .sec-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: #6e7681; }
+    .user-entry { display: flex; align-items: center; gap: 10px; padding: 6px 14px; }
+    .user-name { font-size: 12px; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-pos { font-size: 10px; color: #6e7681; }
+    .you-badge { font-size: 9px; color: #8b949e; }
+    .typing-ind { display: inline-flex; gap: 2px; align-items: center; }
+    .tdot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: typ 1.2s infinite; }
+    .tdot:nth-child(2){animation-delay:.2s} .tdot:nth-child(3){animation-delay:.4s}
+    @keyframes typ{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-3px);opacity:1}}
+    .chat-section { border-top: 1px solid #30363d; display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    .chat-scroll { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .chat-scroll::-webkit-scrollbar { width: 4px; }
+    .chat-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+    .chat-msg { padding: 4px 13px; }
+    .chat-name { font-size: 11px; font-weight: 600; }
+    .chat-text { font-size: 11px; color: #c9d1d9; line-height: 1.4; }
+    .chat-time { font-size: 10px; color: #484f58; }
+    .chat-input-row { padding: 8px 10px; border-top: 1px solid #30363d; display: flex; gap: 6px; }
+    .chat-input {
+      flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #e6edf3; font-family: 'Inter', sans-serif; font-size: 12px;
+      padding: 6px 10px; outline: none; transition: border-color .15s;
+    }
+    .chat-input:focus { border-color: #388bfd; }
+    .send-btn { background: #238636; border: none; border-radius: 6px; color: white; cursor: pointer; padding: 6px 10px; flex-shrink: 0; }
+    .send-btn:hover { background: #2ea043; }
+    .badge { background: #388bfd; color: white; border-radius: 8px; font-size: 10px; padding: 1px 6px; }
+
+    /* ─── EDITOR ─── */
+    .editor-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; font-family: 'JetBrains Mono', monospace; }
+    .tabbar {
+      background: #161b22; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; padding: 0 12px; height: 38px; gap: 4px;
+    }
+    .tab {
+      background: #21262d; border: 1px solid #30363d; border-bottom: none;
+      border-radius: 6px 6px 0 0; padding: 5px 14px; font-size: 12px;
+      color: #c9d1d9; display: flex; align-items: center; gap: 7px;
+    }
+    .code-area { flex: 1; overflow: auto; background: #0d1117; display: flex; }
+    .code-area::-webkit-scrollbar { width: 5px; height: 5px; }
+    .code-area::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .line-nos {
+      width: 48px; padding: 14px 8px; text-align: right; color: #484f58;
+      font-size: 13px; line-height: 1.65; user-select: none; flex-shrink: 0;
+      border-right: 1px solid #1c2128;
+    }
+    .code-body { flex: 1; padding: 14px 14px 14px 12px; position: relative; }
+    .code-pre { font-size: 13px; line-height: 1.65; font-family: inherit; tab-size: 2; white-space: pre; position: relative; z-index: 2; }
+    .code-ta {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      opacity: 0; resize: none; z-index: 10;
+      font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.65;
+      padding: 14px 14px 14px 12px;
+      background: transparent; border: none; outline: none;
+      color: transparent; caret-color: #e6edf3; tab-size: 2;
+    }
+    .statusbar {
+      background: #161b22; border-top: 1px solid #30363d;
+      padding: 0 14px; display: flex; align-items: center; gap: 14px; height: 28px;
+      font-size: 11px; color: #8b949e;
+    }
+    .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; }
+    .cursor-label {
+      position: absolute; background: var(--cc); color: white;
+      font-size: 9px; padding: 1px 5px; border-radius: 3px 3px 3px 0;
+      white-space: nowrap; font-family: 'Inter', sans-serif; font-weight: 600;
+      z-index: 9; pointer-events: none; top: -16px;
+    }
+    .cursor-bar { position: absolute; width: 2px; pointer-events: none; z-index: 8; }
+
+    /* ─── TOAST ─── */
+    #toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #1c2128; border: 1px solid #30363d; border-radius: 8px;
+      padding: 9px 18px; font-size: 13px; color: #e6edf3;
+      opacity: 0; transition: all .25s; pointer-events: none; z-index: 200;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ JOIN OVERLAY ═══════════════════ -->
+<div id="joinOverlay">
+  <div class="join-card">
+    <div class="join-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </div>
+    <h1>CollabCode</h1>
+    <p>Real-time collaborative code editor. Multiple people, one codebase, live.</p>
+
+    <div class="join-field">
+      <label>Your name</label>
+      <input class="join-input" id="nameInput" placeholder="e.g. Alex Chen" maxlength="24" />
+    </div>
+
+    <button class="btn-primary" onclick="createRoom()" style="margin-bottom:0">
+      ✦ Create new room
+    </button>
+
+    <div class="join-or">or join existing</div>
+
+    <div class="join-row">
+      <input class="join-input" id="roomInput" placeholder="Room ID e.g. ROOM-XK47P" style="flex:1;margin-bottom:0" />
+      <button class="btn-secondary" onclick="joinRoom()" style="flex:0;white-space:nowrap;padding:10px 16px">Join →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ APP ═══════════════════ -->
+<div id="app">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="logo">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </div>
+    <span class="app-title">CollabCode</span>
+    <div class="divider"></div>
+    <div class="room-pill" onclick="copyRoomLink()" title="Click to copy invite link">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      <span class="room-id" id="roomIdDisplay">—</span>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+    </div>
+    <div class="spacer"></div>
+    <button class="lang-btn active" id="btnJS" onclick="switchLang('js')">JS</button>
+    <button class="lang-btn" id="btnPY" onclick="switchLang('py')">PY</button>
+    <button class="lang-btn" id="btnTS" onclick="switchLang('ts')">TS</button>
+    <div class="divider"></div>
+    <div style="display:flex;margin-left:4px" id="avatarRow"></div>
+    <div style="display:flex;align-items:center;gap:6px;margin-left:10px">
+      <div class="online-dot"></div>
+      <span style="font-size:12px;color:#8b949e" id="onlineCount">1 online</span>
+    </div>
+    <div class="divider" style="margin-left:8px"></div>
+    <div class="save-status" id="saveStatus" style="color:#3fb950">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      Saved
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div>
+        <div class="sec-header">
+          <span class="sec-label">Collaborators</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6e7681" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="usersPanel"></div>
+      </div>
+      <div class="chat-section">
+        <div class="sec-header">
+          <span class="sec-label">Chat</span>
+          <span class="badge" id="chatBadge" style="display:none">0</span>
+        </div>
+        <div class="chat-scroll" id="chatScroll"></div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chatInput" placeholder="Message..." onkeydown="if(event.key==='Enter')sendMsg()" />
+          <button class="send-btn" onclick="sendMsg()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- EDITOR -->
+    <div class="editor-pane">
+      <div class="tabbar">
+        <div class="tab">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="fileName">main.js</span>
+        </div>
+        <div style="flex:1"></div>
+        <span style="font-size:11px;color:#484f58" id="lineCount">0 lines · UTF-8</span>
+      </div>
+      <div class="code-area" id="codeArea">
+        <div class="line-nos" id="lineNos"></div>
+        <div class="code-body" id="codeBody">
+          <div id="lineHighlights" style="position:absolute;top:14px;left:0;right:0;pointer-events:none;z-index:1"></div>
+          <pre class="code-pre" id="codePre"></pre>
+          <textarea class="code-ta" id="codeTA" spellcheck="false" autocapitalize="off"
+            oninput="onCodeInput()"
+            onkeydown="handleTab(event)"
+            onmouseup="trackCursor()" onkeyup="trackCursor()"></textarea>
+        </div>
+      </div>
+      <div class="statusbar">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="conn-dot" id="connDot"></div>
+          <span id="connLabel" style="color:#3fb950">Connected</span>
+        </div>
+        <span>|</span>
+        <span id="wsUrl" style="font-family:'JetBrains Mono',monospace;font-size:10px"></span>
+        <div style="flex:1"></div>
+        <span id="statusLang">JavaScript</span>
+        <span>|</span>
+        <span>Spaces: 2</span>
+        <span>|</span>
+        <span id="cursorPos">Ln 1, Col 1</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  COLLAB CODE — CLIENT
+// ═══════════════════════════════════════════════════════
+
+const COLORS = [
+  '#4f46e5','#059669','#dc2626','#d97706','#7c3aed','#0891b2',
+  '#db2777','#ea580c','#16a34a','#2563eb'
+];
+
+const STARTER = {
+  js: `// Real-time collaborative editor\n// Multiple users editing simultaneously\n\nclass EventEmitter {\n  constructor() {\n    this.events = {};\n  }\n\n  on(event, listener) {\n    if (!this.events[event]) {\n      this.events[event] = [];\n    }\n    this.events[event].push(listener);\n    return this;\n  }\n\n  emit(event, ...args) {\n    if (this.events[event]) {\n      this.events[event].forEach(listener => listener(...args));\n    }\n    return this;\n  }\n}\n\nconst socket = new EventEmitter();\n\nsocket.on('user:join', (user) => {\n  console.log(\`\${user.name} joined\`);\n  updateUserList(user);\n});\n\nsocket.on('code:change', (delta) => {\n  applyDelta(delta);\n  broadcastChange(delta);\n});\n\nfunction applyDelta(delta) {\n  const { position, inserted, deleted } = delta;\n  return transformDocument(position, inserted, deleted);\n}`,
+  py: `# Collaborative Python editor\n# Real-time sync with WebSockets\n\nimport asyncio\nimport websockets\nimport json\nfrom dataclasses import dataclass\nfrom typing import Dict, List, Optional\n\n@dataclass\nclass User:\n    id: str\n    name: str\n    cursor_pos: int\n    color: str\n\n@dataclass\nclass Delta:\n    user_id: str\n    position: int\n    inserted: str\n    deleted: int\n    timestamp: float\n\nclass CollaborativeDocument:\n    def __init__(self, room_id: str):\n        self.room_id = room_id\n        self.content = ""\n        self.users: Dict[str, User] = {}\n\n    def apply_delta(self, delta: Delta) -> bool:\n        try:\n            pos = delta.position\n            if delta.deleted > 0:\n                self.content = (\n                    self.content[:pos] +\n                    self.content[pos + delta.deleted:]\n                )\n            if delta.inserted:\n                self.content = (\n                    self.content[:pos] +\n                    delta.inserted +\n                    self.content[pos:]\n                )\n            return True\n        except Exception as e:\n            print(f"Error: {e}")\n            return False`,
+  ts: `// TypeScript collaborative editor\n// Production-ready WebSocket implementation\n\ninterface User {\n  id: string;\n  name: string;\n  color: string;\n  cursorPosition: number;\n  selection?: { start: number; end: number };\n}\n\ninterface Delta {\n  userId: string;\n  position: number;\n  inserted: string;\n  deleted: number;\n  timestamp: number;\n  version: number;\n}\n\nclass OperationalTransform {\n  static transform(op1: Delta, op2: Delta): [Delta, Delta] {\n    if (op1.position <= op2.position) {\n      const op2Prime = {\n        ...op2,\n        position: op2.position + op1.inserted.length - op1.deleted\n      };\n      return [op1, op2Prime];\n    }\n    const op1Prime = {\n      ...op1,\n      position: op1.position + op2.inserted.length - op2.deleted\n    };\n    return [op1Prime, op2];\n  }\n}\n\nclass CollabEditor {\n  private socket: WebSocket;\n  private pendingOps: Delta[] = [];\n\n  constructor(roomId: string, wsUrl: string) {\n    this.socket = new WebSocket(wsUrl);\n    this.setupHandlers();\n  }\n\n  sendDelta(delta: Delta): void {\n    this.pendingOps.push(delta);\n    this.socket.send(JSON.stringify(delta));\n  }\n}`
+};
+
+const KW = {
+  js:  ['class','constructor','function','const','let','var','return','if','else','forEach','new','this','import','export','default','async','await','typeof','instanceof','null','undefined','true','false'],
+  py:  ['class','def','import','from','return','if','else','elif','try','except','finally','async','await','for','in','while','with','as','lambda','yield','True','False','None','self','print','and','or','not','is'],
+  ts:  ['interface','class','const','let','var','function','return','if','else','new','this','import','export','type','private','public','protected','readonly','extends','implements','enum','namespace','abstract','declare']
+};
+const TCLR = { keyword:'#c792ea', string:'#c3e88d', number:'#f78c6c', comment:'#546e7a', operator:'#89ddff', identifier:'#eeffff', other:'#eeffff' };
+
+// ─── STATE ───
+let socket = null;
+let myId = null, myName = '', myColor = '';
+let curRoom = '';
+let curLang = 'js';
+let curCode = STARTER.js;
+let users = {}; // id → {name,color,line,col,typing}
+let saveTimer = null;
+let unreadChat = 0;
+let isTypingTimer = null;
+
+// ─── INIT ───
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(location.search);
+  const roomParam = params.get('room');
+  if (roomParam) {
+    document.getElementById('roomInput').value = roomParam.toUpperCase();
+    document.getElementById('nameInput').focus();
+  } else {
+    document.getElementById('nameInput').focus();
+  }
+});
+
+// ─── JOIN / CREATE ───
+function getName() {
+  const v = document.getElementById('nameInput').value.trim();
+  if (!v) { toast('Please enter your name'); document.getElementById('nameInput').focus(); return null; }
+  return v;
+}
+
+function createRoom() {
+  const name = getName(); if (!name) return;
+  const roomId = 'ROOM-' + Math.random().toString(36).slice(2,7).toUpperCase();
+  connect(name, roomId);
+}
+
+function joinRoom() {
+  const name = getName(); if (!name) return;
+  const roomId = document.getElementById('roomInput').value.trim().toUpperCase();
+  if (!roomId) { toast('Enter a Room ID'); return; }
+  connect(name, roomId);
+}
+
+function connect(name, roomId) {
+  myName = name;
+  curRoom = roomId;
+  myColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+
+  document.getElementById('joinOverlay').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('roomIdDisplay').textContent = roomId;
+  document.getElementById('wsUrl').textContent = `ws://${location.host}/room/${roomId}`;
+
+  socket = io();
+
+  socket.on('connect', () => {
+    myId = socket.id;
+    setConnected(true);
+    socket.emit('join', { roomId, name, color: myColor });
+  });
+
+  socket.on('disconnect', () => setConnected(false));
+
+  socket.on('room:state', ({ code, lang, users: roomUsers }) => {
+    curCode = code;
+    curLang = lang;
+    users = {};
+    roomUsers.forEach(u => { users[u.id] = u; });
+    switchLangUI(lang);
+    renderCode();
+    renderUsers();
+  });
+
+  socket.on('user:joined', (user) => {
+    users[user.id] = { ...user, line: 1, col: 1, typing: false };
+    renderUsers();
+    addChatSystem(`${user.name} joined the room`);
+  });
+
+  socket.on('user:left', ({ id, name }) => {
+    delete users[id];
+    renderUsers();
+    renderCode();
+    addChatSystem(`${name} left`);
+  });
+
+  socket.on('code:update', ({ code, userId }) => {
+    if (userId === myId) return;
+    const ta = document.getElementById('codeTA');
+    const sel = ta.selectionStart;
+    curCode = code;
+    renderCode();
+    try { ta.setSelectionRange(sel, sel); } catch(e){}
+  });
+
+  socket.on('cursor:update', ({ id, line, col, typing }) => {
+    if (id === myId) return;
+    if (users[id]) { users[id].line = line; users[id].col = col; users[id].typing = typing; }
+    renderUsers();
+    renderCode();
+  });
+
+  socket.on('lang:change', ({ lang }) => {
+    switchLangUI(lang);
+  });
+
+  socket.on('chat:message', ({ id, name, color, text, ts }) => {
+    addChatMsg(name, color, text, ts, id === myId);
+    if (id !== myId) {
+      unreadChat++;
+      updateChatBadge();
+    }
+  });
+}
+
+function setConnected(v) {
+  document.getElementById('connDot').style.background = v ? '#3fb950' : '#f85149';
+  document.getElementById('connLabel').textContent = v ? 'Connected' : 'Reconnecting...';
+  document.getElementById('connLabel').style.color = v ? '#3fb950' : '#f85149';
+}
+
+// ─── CODE EDITING ───
+function onCodeInput() {
+  curCode = document.getElementById('codeTA').value;
+  renderCode();
+  setSaving();
+  socket?.emit('code:change', { roomId: curRoom, code: curCode });
+  trackCursor();
+
+  clearTimeout(isTypingTimer);
+  socket?.emit('cursor:move', { roomId: curRoom, line: getCursorLine(), col: getCursorCol(), typing: true });
+  isTypingTimer = setTimeout(() => {
+    socket?.emit('cursor:move', { roomId: curRoom, line: getCursorLine(), col: getCursorCol(), typing: false });
+  }, 800);
+}
+
+function handleTab(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const ta = document.getElementById('codeTA');
+    const s = ta.selectionStart, end = ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(end);
+    ta.setSelectionRange(s + 2, s + 2);
+    onCodeInput();
+  }
+}
+
+function trackCursor() {
+  const ln = getCursorLine(), col = getCursorCol();
+  document.getElementById('cursorPos').textContent = `Ln ${ln}, Col ${col}`;
+  if (users[myId]) { users[myId].line = ln; users[myId].col = col; }
+  socket?.emit('cursor:move', { roomId: curRoom, line: ln, col: col, typing: false });
+  renderUsers();
+}
+
+function getCursorLine() {
+  const ta = document.getElementById('codeTA');
+  return ta.value.slice(0, ta.selectionStart).split('\n').length;
+}
+function getCursorCol() {
+  const ta = document.getElementById('codeTA');
+  const lines = ta.value.slice(0, ta.selectionStart).split('\n');
+  return lines[lines.length - 1].length + 1;
+}
+
+function setSaving() {
+  const s = document.getElementById('saveStatus');
+  s.style.color = '#e3b341';
+  s.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:#e3b341;display:inline-block;animation:pulse 1s infinite"></span> Saving...';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    s.style.color = '#3fb950';
+    s.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Saved';
+  }, 800);
+}
+
+// ─── RENDER CODE ───
+const CH = 21.45; // line height px
+function renderCode() {
+  const lines = curCode.split('\n');
+  const pre = document.getElementById('codePre');
+  const lnos = document.getElementById('lineNos');
+  const highlights = document.getElementById('lineHighlights');
+  const ta = document.getElementById('codeTA');
+  if (!pre || !lnos) return;
+
+  // line numbers
+  lnos.innerHTML = '';
+  lines.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.style.lineHeight = '1.65';
+    const active = Object.values(users).some(u => u.id !== myId && u.line === i + 1);
+    d.style.color = active ? '#e6edf3' : '#484f58';
+    d.style.background = active ? 'rgba(56,139,253,.08)' : 'transparent';
+    d.textContent = i + 1;
+    lnos.appendChild(d);
+  });
+
+  // highlights
+  highlights.innerHTML = '';
+  Object.values(users).forEach(u => {
+    if (u.id === myId) return;
+    const d = document.createElement('div');
+    d.style.cssText = `position:absolute;left:0;right:0;top:${(u.line-1)*CH}px;height:${CH}px;background:${u.color}18;pointer-events:none;`;
+    highlights.appendChild(d);
+  });
+
+  // syntax highlight
+  let html = '';
+  const cw = 7.8;
+  lines.forEach((line, li) => {
+    const toks = tokenizeLine(line, curLang);
+    let lineHtml = '';
+    Object.values(users).forEach(u => {
+      if (u.id === myId || u.line !== li + 1) return;
+      const left = Math.min(u.col, line.length) * cw;
+      lineHtml += `<span class="cursor-label" style="--cc:${u.color};left:${left}px">${u.name.split(' ')[0]}</span><span class="cursor-bar" style="top:0;left:${left}px;height:${CH}px;background:${u.color}"></span>`;
+    });
+    toks.forEach(t => { lineHtml += `<span style="color:${TCLR[t.t]||'#eeffff'}">${esc(t.v)}</span>`; });
+    html += `<div style="position:relative;min-height:${CH}px">${lineHtml}</div>`;
+  });
+  pre.innerHTML = html;
+  ta.value = curCode;
+  document.getElementById('lineCount').textContent = `${lines.length} lines · UTF-8`;
+}
+
+function tokenizeLine(line, lang) {
+  const kws = KW[lang] || KW.js;
+  const toks = []; let rem = line;
+  while (rem.length > 0) {
+    if (rem.startsWith('//') || rem.startsWith('#')) { toks.push({t:'comment',v:rem}); break; }
+    const sm = rem.match(/^(['"`])(.*?)\1/);
+    if (sm) { toks.push({t:'string',v:sm[0]}); rem=rem.slice(sm[0].length); continue; }
+    const nm = rem.match(/^\b\d+(\.\d+)?\b/);
+    if (nm) { toks.push({t:'number',v:nm[0]}); rem=rem.slice(nm[0].length); continue; }
+    let hit = false;
+    for (const kw of kws) {
+      const r = new RegExp(`^\\b${kw}\\b`);
+      if (r.test(rem)) { toks.push({t:'keyword',v:kw}); rem=rem.slice(kw.length); hit=true; break; }
+    }
+    if (hit) continue;
+    const op = rem.match(/^[{}()[\]:;,.<>=!+\-*\/&|?]/);
+    if (op) { toks.push({t:'operator',v:op[0]}); rem=rem.slice(1); continue; }
+    const wm = rem.match(/^[^\s{}()[\]:;,.<>=!+\-*\/&|?'"` ]+/);
+    if (wm) { toks.push({t:'identifier',v:wm[0]}); rem=rem.slice(wm[0].length); continue; }
+    const ws = rem.match(/^\s+/);
+    if (ws) { toks.push({t:'other',v:ws[0]}); rem=rem.slice(ws[0].length); continue; }
+    toks.push({t:'other',v:rem[0]}); rem=rem.slice(1);
+  }
+  return toks;
+}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ─── RENDER USERS ───
+function renderUsers() {
+  const panel = document.getElementById('usersPanel');
+  const avRow = document.getElementById('avatarRow');
+  if (!panel || !avRow) return;
+  panel.innerHTML = ''; avRow.innerHTML = '';
+  const all = Object.values(users);
+  all.forEach((u, i) => {
+    const isMe = u.id === myId;
+    const initials = u.name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
+    const d = document.createElement('div');
+    d.className = 'user-entry';
+    d.innerHTML = `
+      <div class="avatar" style="background:${u.color};width:24px;height:24px">${initials}</div>
+      <div style="flex:1;min-width:0">
+        <div class="user-name">${u.name}${isMe?' <span class="you-badge">(you)</span>':''}</div>
+        <div class="user-pos" style="color:${u.color}88">${u.typing
+          ? `<span class="typing-ind" style="color:${u.color}"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span></span> typing`
+          : `Ln ${u.line||1}, Col ${u.col||1}`
+        }</div>
+      </div>
+      <div style="width:6px;height:6px;border-radius:50%;background:#3fb950;flex-shrink:0"></div>`;
+    panel.appendChild(d);
+
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.cssText = `background:${u.color};${i>0?'margin-left:-8px':''}`;
+    av.title = u.name;
+    av.textContent = initials;
+    avRow.appendChild(av);
+  });
+  document.getElementById('onlineCount').textContent = `${all.length} online`;
+}
+
+// ─── LANG SWITCH ───
+function switchLang(l) {
+  if (curLang === l) return;
+  curLang = l;
+  curCode = STARTER[l];
+  switchLangUI(l);
+  renderCode();
+  socket?.emit('lang:change', { roomId: curRoom, lang: l });
+  socket?.emit('code:change', { roomId: curRoom, code: curCode });
+}
+
+function switchLangUI(l) {
+  curLang = l;
+  ['JS','PY','TS'].forEach((lb,i) => {
+    const b = document.getElementById('btn'+lb);
+    if (b) b.className = 'lang-btn' + (['js','py','ts'][i]===l?' active':'');
+  });
+  const names = {js:'main.js', py:'main.py', ts:'main.ts'};
+  const snames = {js:'JavaScript', py:'Python', ts:'TypeScript'};
+  document.getElementById('fileName').textContent = names[l];
+  document.getElementById('statusLang').textContent = snames[l];
+}
+
+// ─── CHAT ───
+function sendMsg() {
+  const inp = document.getElementById('chatInput');
+  if (!inp || !inp.value.trim()) return;
+  socket?.emit('chat:message', { roomId: curRoom, text: inp.value.trim() });
+  inp.value = '';
+}
+
+function addChatMsg(name, color, text, ts, isMe) {
+  const scroll = document.getElementById('chatScroll');
+  const d = document.createElement('div');
+  d.className = 'chat-msg';
+  d.style.marginTop = '4px';
+  const time = ts ? new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'now';
+  d.innerHTML = `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+      <span class="chat-name" style="color:${color}">${esc(name)}${isMe?' <span style="color:#484f58;font-size:9px">(you)</span>':''}</span>
+      <span class="chat-time">${time}</span>
+    </div>
+    <div class="chat-text">${esc(text)}</div>`;
+  scroll.appendChild(d);
+  scroll.scrollTop = scroll.scrollHeight;
+}
+
+function addChatSystem(text) {
+  const scroll = document.getElementById('chatScroll');
+  const d = document.createElement('div');
+  d.style.cssText = 'padding:3px 13px;font-size:10px;color:#484f58;font-style:italic';
+  d.textContent = text;
+  scroll.appendChild(d);
+  scroll.scrollTop = scroll.scrollHeight;
+}
+
+function updateChatBadge() {
+  const b = document.getElementById('chatBadge');
+  if (unreadChat > 0) { b.style.display = ''; b.textContent = unreadChat; }
+  else b.style.display = 'none';
+}
+
+// ─── COPY ROOM LINK ───
+function copyRoomLink() {
+  const url = `${location.origin}?room=${curRoom}`;
+  navigator.clipboard.writeText(url).then(() => toast('Invite link copied!'));
+  const el = document.getElementById('roomIdDisplay');
+  const orig = el.textContent;
+  el.textContent = '✓ Copied!';
+  setTimeout(() => el.textContent = orig, 1500);
+}
+
+// ─── TOAST ───
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// init render
+renderCode();
+</script>
+</body>
+</html>
